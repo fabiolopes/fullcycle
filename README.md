@@ -41,3 +41,9 @@ Assim como o volume, o comando *--mount* mapeia um diretório que compartilha os
 Para excluir um container, executamos o comando docker rm, informando o id ou o nome, que pode ser visto em *docker ps* ou *docker ps -a*, conforme abaixo:
 
 `docker rm {{id_container || nome_container}}`
+
+#### Anotações push do git
+
+Desde setembro de 2021 não é mais aceito dentro do github submeter push via login/senha. Temos que cadastrar um token dentro do github, para após isso, executar o comando abaixo:
+
+`git remote set-url origin https://[colar aqui o token gerado]@github.com/[repositorio]`
