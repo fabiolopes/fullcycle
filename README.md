@@ -47,3 +47,33 @@ Para excluir um container, executamos o comando docker rm, informando o id ou o 
 Desde setembro de 2021 não é mais aceito dentro do github submeter push via login/senha. Temos que cadastrar um token dentro do github, para após isso, executar o comando abaixo:
 
 `git remote set-url origin https://[colar aqui o token gerado]@github.com/[repositorio]`
+
+
+### Criação de imagem utilizando Dockerfile
+Dentro de um arquivo chamado Dockerfile, podemos definir uma imagem fonte e personalizações baseadas nas imagens selecionadas. Vejamos o conteúdo abaixo de um dockerfile:
+
+`FROM nginx:latest`
+`RUN apt-get update`
+`RUN apt-get install vim -y`
+
+No conteúdo, estamos solicitando que seja instaldo dentro da imagem base do nginx o vim.
+
+`docker build -t fabiobione/nginx-com-vim:latest ./path_do_Dockerfile`
+
+Isso irá construir uma imagem docker de nome **fabiobione/nginx-com-vim** com a tag **latest** no caminho designado após esses dados. Ao executar.
+
+### Aprofundando o Dockerfile
+Vamos analisar o seguinte conteúdo:
+
+`FROM nginx:latest`  
+`WORKDIR /app`  
+`RUN apt-get update && \`  
+`apt-get install vim -y`  
+`COPY html /usr/share/nginx/html`  
+
+O comando **WORKDIR** define um diretório no container que será a pasta home. Dentro so **RUN** pode ser visto comandos encadeados pela notação 
+*&& \\* . **COPY** irá copiar algo de fora do container para dentro. Se após docker build dessa imagem, entrarmos no container, iremos ver o conteúdo da pasta externa html dentro do container, executando o seguinte:
+
+`docker run -it fabiobione/nginx-com-vim bash`  
+Dentro da pasta *app* no container:  
+`cat /usr/share/nginx/html/index.html`
