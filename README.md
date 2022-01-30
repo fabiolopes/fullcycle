@@ -92,3 +92,13 @@ O ENTRYPOINT é o comando de entrada que será executado ao subir o container. N
 `docker run --rm fabiobione/hello Bione`  
 
 Nesse caso, o comando executado pelo ENTRYPOINT será *echo Hello Bione*
+
+
+### Subindo imagens no docker hub
+Vamos pegar como exemplo a imagem criada fabiobione/nginx-com-vim. *fabiobione* corresponde ao usuário do docker hub. Execute os comandos abaixo:  
+`docker login`  
+
+Insira login e senha na linha de comando, e após execute:  
+`docker push fabiobione/nginx-com-vim`  
+
+Após isso, o container estará salvo no docker hub logado.
