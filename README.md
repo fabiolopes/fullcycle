@@ -77,3 +77,18 @@ O comando **WORKDIR** define um diretório no container que será a pasta home. 
 `docker run -it fabiobione/nginx-com-vim bash`  
 Dentro da pasta *app* no container:  
 `cat /usr/share/nginx/html/index.html`
+
+### CMD e ENTRYPOINT
+
+`Observe o Dockerfile abaixo:`  
+`FROM ubuntu:latest`  
+`ENTRYPOINT ["echo", "Hello "]`  
+`CMD ["World"]`  
+
+CMD define qualquer execução dentro de um terminal dento do container.
+
+O ENTRYPOINT é o comando de entrada que será executado ao subir o container. No exemplo acima, o cmd adicionará entrada de dados ao comando executado no ENTRYPOINT, no caso, *echo Hello world*. Podemos mudar inserir comandos ao entrypoint ao fazer a execuçã do container, como segue abaixo:
+
+`docker run --rm fabiobione/hello Bione`  
+
+Nesse caso, o comando executado pelo ENTRYPOINT será *echo Hello Bione*

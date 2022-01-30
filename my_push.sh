@@ -1,14 +1,12 @@
 #!/bin/bash
 
 branch=main
-message="dummy commit"
-echo "arguments: $1,$2" 
+message="dummy commit" 
 
 if [ $# -ge 2 ]
   then
     branch=$1
     message=$2
-    echo "Variaveis atribuídas: $branch, $message"
 fi
 
 git add .
