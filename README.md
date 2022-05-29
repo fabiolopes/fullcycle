@@ -102,3 +102,50 @@ Insira login e senha na linha de comando, e após execute:
 `docker push fabiobione/nginx-com-vim`  
 
 Após isso, o container estará salvo no docker hub logado.
+
+### Comando utilizados na aula de subida d node + mysql
+
+após executar docker-compose up -d, executamos:
+```
+docker exec -it db bash;
+
+```
+
+Dentro do container db, usamos os comando para entrar no usuário root e criar tabela:
+
+```
+mysql -uroot -p
+--para visualizar
+show databases;
+--setar a base a ser utlizada
+use nodedb;
+--criação da tabela
+create table people(id int not null auto_increment, name varchar(255), primary key(id));
+```
+
+### Tratando dependencia enre containeres
+
+no nosso caso de uso, Temos que app depende de db para subir, com isso, adicionamos no service app:
+
+`    depends_on:
+      - db`
+
+Todavia, isso apenas garante que o container app será criado após db. Mas não garante que app aguarde que db esteja totalmente em pé, podendo gerar problemas.
+Para essa cenário, podemos utilizar [dockerize](https://github.com/jwilder/dockerize).No caso, adicionamos no Dockerfile do app (node) o seguinte trecho:
+
+```
+ENV DOCKERIZE_VERSION v0.6.1
+RUN wget https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSION/dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
+    && tar -C /usr/local/bin -xzvf dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
+    && rm dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz
+```
+
+e no service app, contido no docker-compose.yaml:
+
+```
+    entrypoint: dockerize -wait tcp://db:3306 -timeout 20s docker-entrypoint.sh
+```
+
+Sendo o comando *docker-entrypoint.sh* o entrypoint padrão da imagem node.
+
+Após isso, podemos rodar docker-compose up -d --build, e veremos no log que o container irá aguardar até o db subir. 
