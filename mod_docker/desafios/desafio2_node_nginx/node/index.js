@@ -1,3 +1,4 @@
+const randomName = require('node-random-name')
 const express = require('express')
 const app = express()
 const port = 3000
@@ -16,7 +17,7 @@ function executeQuery(sql) {
 }
 
 app.get('/', (req, res) => {
-    executeQuery(`insert into people(name) values('Bione')`)
+    executeQuery(`insert into people(name) values('${randomName()}')`)
     var connection = mysql.createConnection(config)
     connection.query("select name from people", function(err, result, fields){
         if (err) throw err;
