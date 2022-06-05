@@ -149,3 +149,5 @@ e no service app, contido no docker-compose.yaml:
 Sendo o comando *docker-entrypoint.sh* o entrypoint padrão da imagem node.
 
 Após isso, podemos rodar docker-compose up -d --build, e veremos no log que o container irá aguardar até o db subir. 
+
+Continua
