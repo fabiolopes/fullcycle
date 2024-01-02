@@ -18,7 +18,13 @@ spec:
       - name: goserver
         image: fabiobione/hello-go:v4
         env:
-          - name: name
-            value: "Bione"
+          - name: NAME
+            valueFrom:
+              configMapKeyRef:
+                name: goserver-env
+                key: NAME
           - name: AGE
-            value: "38"
+            valueFrom:
+              configMapKeyRef:
+                name: goserver-env
+                key: AGE
