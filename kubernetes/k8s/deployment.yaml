@@ -17,8 +17,6 @@ spec:
       containers:
       - name: goserver
         image: fabiobione/hello-go:v4
-        env:
-          - name: name
-            value: "Bione"
-          - name: AGE
-            value: "38"
+        envFrom:
+          - configMapRef:
+              name: goserver-env
