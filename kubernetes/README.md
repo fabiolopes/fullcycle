@@ -234,7 +234,7 @@ Quando dermos o comando de apply e o port-forward, Teremos printado na tela a me
 
 ### ConfigMap
 
-POdemos separar as variáveis de ambiente em um arquivo do tipo ConfigMap. Vamos criá-lo:
+Podemos separar as variáveis de ambiente em um arquivo do tipo ConfigMap. Vamos criá-lo:
 
 ```
 apiVersion: v1
@@ -316,4 +316,49 @@ spec:
         envFrom:
           - configMapRef:
               name: goserver-env
+```
+
+
+### Injetando Configmap na aplicação
+
+Vamos imaginar um cenário onde precisaremos injetar arquivos na aplicação, tanto arquivos novos, como substituição de arquivos. Podemos usar configmaps para substituit, por exemplo arquivos confs, ou qualquer outro.
+
+Vamos criar um novo endpoint no server.go, ponde ele pegará dados de um arquivo que não está pré definido no projeto:
+
+Adicionando os imports:
+```
+import "io/ioutil"
+import "log"
+```
+
+Adicionando agora o novo endpoint:
+```
+func main() {
+	http.HandleFunc("/configmap", ConfigMap)
+. . .
+```
+
+E a nova função que pegará os dados do arquivo:
+
+```
+func ConfigMap(w http.ResponseWriter, r *http.Request) {
+	data, err := ioutil.ReadFile("myFamily/family.txt")
+	if err != nil {
+		log.Fatalf("Error reading file: ", err)
+	}
+
+	fmt.Fprintf(w, "My family: %s", string(data))
+}
+```
+
+Ainda não existe o arquivo "myFamily/family.txt". Vamos criar um novo configmap que servirá de base para a criação do arquivo:
+
+__configmap-family.yml__
+```
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configmap-family
+data:
+  members: "Fabio, Izabel"
 ```

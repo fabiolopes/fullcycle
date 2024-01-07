@@ -16,7 +16,21 @@ spec:
     spec:
       containers:
       - name: goserver
-        image: fabiobione/hello-go:v4
+        image: fabiobione/hello-go:v5
         envFrom:
           - configMapRef:
               name: goserver-env
+
+        volumeMounts:
+          - mountPath: "/go/myFamily"
+            name: config
+
+      volumes:
+        - name: config
+          configMap:
+            name: configmap-family
+            items:
+            - key: members
+              path: "family.txt"
+
+
