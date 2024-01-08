@@ -655,3 +655,39 @@ Agora vamos aplicar o deployment e observar que apenas após 10 segundos a aplic
 ```
 kubectl apply -f k8s/deployment.yaml && watch -n1 kubectl get pods
 ```
+
+Obs: TRabalhar com readinessProbe em conjunto com livenessProbe é um tanto desafiador, visto que, olhando do ponto de vista do exemplo implementado, o livenesse sempre irá impactar o readiness. Uma forma de resolver isso é através do startupProbe, que garante um estado incial,e só depois disso o readiness e o liveness passam a funcionar.
+
+Vamos ver como fica a configuração no deployment:
+```
+      containers:
+      - name: goserver
+        image: fabiobione/hello-go:v5.4
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          periodSeconds: 3
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          periodSeconds: 3
+          failureThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          periodSeconds: 5
+          failureThreshold: 1
+          timeoutSeconds: 1
+          successThreshold: 1
+```
+
+Vamos atualizar o deployment:
+```
+kubectl apply -f k8s/deployment.yaml && watch -n1 kubectl get pods
+```
+
+O que perceberemos é que após os 10 segundos, a aplicação/container estará disponível. E, após os 30 segundos, não estará disponível por conta do reeadinessProbe, e depois será reiniciado como efeito do livenessProbe, e aí começamos novamente com o startupProbe.
