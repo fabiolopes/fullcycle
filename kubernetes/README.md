@@ -362,3 +362,296 @@ metadata:
 data:
   members: "Fabio, Izabel"
 ```
+
+
+Agora vamos fazer 2 coisas: 1. fazer push na imagem do hello-go; 2. apply no novo configmap:
+
+```
+docker build -t fabiobione/hello-go:v5 .
+
+docker push fabiobione/hello-go:v5
+```
+
+```
+kubectl apply -f k8s/configmap-family.yml
+```
+
+Agora precisamos fazer algumas alterações no deployment, começando por atualizar a versão da imagem:
+
+```
+      containers:
+      - name: goserver
+        image: fabiobione/hello-go:v5
+```
+
+Vamos agora criar um volume na spec do template, onde o volume se chamará config, referenciará o configmap-family, e os dados será extraídos da key members do arquivo family.txt:
+
+```
+      volumes:
+        - name: config
+          configMap:
+            name: configmap-family
+            items:
+            - key: members
+              path: "family.txt"
+```
+
+E agora em containers, vamos montar o volume no caminho desejado:
+
+```
+        volumeMounts:
+          - mountPath: "/go/myFamily"
+            name: config
+```
+
+Agora vamos dar apply no deployment e fazer port-forward. Se tudo der certo,ao acessar http://localhost:9000/configmap, será apresentado "My family: Fabio, Izabel"
+
+```
+kubectl apply -f k8s/deployment.yaml
+
+kubectl port-forward svc/goserver-service 9000:80
+```
+
+Apenas para visualização, vamos entar em um dos pods para ver o arquivo:
+
+```
+fabio@DESKTOP-5555:~/fullcycle/kubernetes$ kubectl get pods
+NAME                        READY   STATUS              RESTARTS   AGE
+goserver-544bdcccb6-4r7vr   0/1     ContainerCreating   0          7s
+goserver-544bdcccb6-hrztn   1/1     Running             0          7s
+goserver-544bdcccb6-jjkrx   0/1     ContainerCreating   0          7s
+goserver-544bdcccb6-mxgqz   0/1     ContainerCreating   0          7s
+goserver-544bdcccb6-t8fwg   0/1     ContainerCreating   0          7s
+goserver-7fc6b5fcdf-blb4p   1/1     Running             0          5d1h
+goserver-7fc6b5fcdf-cflvs   1/1     Running             0          5d1h
+goserver-7fc6b5fcdf-ddjrz   1/1     Running             0          5d1h
+goserver-7fc6b5fcdf-fbbm7   1/1     Running             0          5d1h
+goserver-7fc6b5fcdf-g2zm9   1/1     Running             0          5d1h
+goserver-7fc6b5fcdf-g59vg   1/1     Running             0          5d1h
+goserver-7fc6b5fcdf-hxlrk   1/1     Running             0          5d1h
+goserver-7fc6b5fcdf-qls8x   1/1     Running             0          5d1h
+
+kubectl exec -it goserver-544bdcccb6-4r7vr -- bash
+root@goserver-544bdcccb6-4r7vr:/go# ls myFamily/
+family.txt
+```
+
+
+### Adicionando uma secret
+
+Vamos criar mais uma function no server.go:
+
+```
+http.HandleFunc("/secret", Secret)
+. . . 
+
+func Secret(w http.ResponseWriter, r *http.Request) {
+	user := os.Getenv("USER")
+	password := os.Getenv("PASSWORD")
+
+	fmt.Fprintf(w, "User: %s. Password %s", user, password	)
+}
+```
+
+Bem parecido com o hello, temos variáveis user e password vindos de varipaveis de ambiente, mas como são informações mais sensíveis, vamos ofuscar elas em secret:
+```
+docker build -t fabiobione/hello-go:v5.1 .
+
+docker push fabiobione/hello-go:v5.1
+```
+
+
+secret.yml
+```
+apiVersion: v1
+kind: Secret
+metadata:
+  name: goserver-secret
+type: Opaque
+data:
+  USER: RmFiaW8K
+  PASSWORD: MTIzNDU2NzgK
+```
+
+Aplicaremos esse arquivo.
+```
+kubectl apply -f k8s/secret.yml
+```
+
+Vamos atualizar a versão da imagem, e inserir o secretRef:
+```
+      containers:
+      - name: goserver
+        image: fabiobione/hello-go:v5.1
+        envFrom:
+          - configMapRef:
+              name: goserver-env
+          - secretRef:
+              name: goserver-secret
+```
+E agora aplicar o deployment:
+```
+kubectl apply -f k8s/deployment.yaml
+
+kubectl port-forward svc/goserver-service 9000:80
+```
+
+Se tudo der certo, ao digitar **http://localhost:9000/secret**, receberemos o retorno (já decodificado):
+
+User: Fabio
+. Password 12345678
+
+
+### Liveness probe
+
+O kubernetes tem um recurso configurável para verificação de saúde de uma aplicação, o **livenessProbe**. Para demonstrar o funcionamento, vamos criar um endpoint no server.go __/healthz__, Onde quandoa a plicação subir teremos um contador de tempo. A partir de 25 segundos de subida, sempre que o endpoint for chamado, ele vai propositalmente retornar um erro 500:
+
+```
+import (
+	"net/http"
+	"os"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"time"	
+)
+
+var startedAt = time.Now() 
+
+func main() {
+	http.HandleFunc("/healthz", Healthz)
+	http.HandleFunc("/secret", Secret)
+	http.HandleFunc("/configmap", ConfigMap)
+	http.HandleFunc("/", Hello)
+	http.ListenAndServe(":8000", nil)
+}
+
+. . . 
+
+func Healthz(w http.ResponseWriter, r *http.Request) {
+	duration := time.Since(startedAt)
+	if duration.Seconds() > 25 {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("Duration: %v", duration.Seconds())))
+	}else{
+		w.WriteHeader(200)
+		w.Write([]byte("Ok"))
+	}
+}
+```
+
+Vamos criar uma nova versão do hello-go:
+```
+docker build -t fabiobione/hello-go:v5.2 .
+
+docker push fabiobione/hello-go:v5.2
+```
+
+Agora vamos implementar o livenesseProbe definindo que serão necessárias 5 chamadas do healthz na porta 8000 bem sucedidas para considerar 1 sucesso, e cada chamada terá 1 segundo de timeout, passando disso, será considerado falha. E o limite de falha para o container reiniciar é 1:
+
+```
+    spec:
+      containers:
+      - name: goserver
+        image: fabiobione/hello-go:v5.2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          periodSeconds: 5
+          failureThreshold: 1
+          timeoutSeconds: 1
+          successThreshold: 1
+```
+
+
+Vamos aplicar o deployment e ao mesmo tempo observar os restats com o tempo:
+```
+kubectl apply -f k8s/deployment.yaml && watch -n1 kubectl get pods
+```
+
+
+Antes dos 25 segundos:
+```
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-745bf5dc4b-2lkvd   1/1     Running   0          24s
+goserver-745bf5dc4b-5247f   1/1     Running   0          24s
+goserver-745bf5dc4b-b2j5m   1/1     Running   0          24s
+goserver-745bf5dc4b-bbwpx   1/1     Running   0          24s
+goserver-745bf5dc4b-bc47k   1/1     Running   0          24s
+goserver-745bf5dc4b-k9t67   1/1     Running   0          24s
+goserver-745bf5dc4b-n8w8n   1/1     Running   0          24s
+goserver-745bf5dc4b-pd6xw   1/1     Running   0          24s
+goserver-745bf5dc4b-sx8k8   1/1     Running   0          24s
+goserver-745bf5dc4b-vvdhq   1/1     Running   0          24s
+```
+
+Agora depois dos 25 segundos, com o endpoint respondendo erro 500:
+
+```
+NAME                        READY   STATUS    RESTARTS      AGE
+goserver-745bf5dc4b-2lkvd   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-5247f   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-b2j5m   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-bbwpx   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-bc47k   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-k9t67   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-n8w8n   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-pd6xw   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-sx8k8   1/1     Running   1 (16s ago)   47s
+goserver-745bf5dc4b-vvdhq   1/1     Running   1 (16s ago)   47s
+```
+
+
+### readinessProbe
+
+Existem situações onde precisamos que um container só esteja pronto quando ele está totalmente ok. Imagine um container que sobe contextos, faz conexão com banco de dados, com filas, e outras dependências externas. Acessar ele antes de todas essas dependências estarem estabelecidas retornará erro porque ele não está pronto. Uma forma de garantir que ele seja acessado apenas quando estiver pronto é o readinessProbe. E para demonstrar, vamos editar o método healthz, definindo que até 10 segundos pós a subida, ele estará indisponível, e depois disso, estará pronto:
+
+```
+func Healthz(w http.ResponseWriter, r *http.Request) {
+	duration := time.Since(startedAt)
+	if duration.Seconds() < 10 {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("Duration: %v", duration.Seconds())))
+	}else{
+		w.WriteHeader(200)
+		w.Write([]byte("Ok"))
+	}
+}
+```
+Vamos criar nova versão do hello-go:
+```
+docker build -t fabiobione/hello-go:v5.3 .
+
+docker push fabiobione/hello-go:v5.3
+```
+
+Vamos comentar todoo bloco de livenessProbe (depois retornaremos a ele). Criaremos um readinessProbe, definindo um delay inicial de 10 segundos, e a cada 3 segundos será feita uma verificação, e 1 falha será suficiente para definir que o container ainda não está pronto.
+
+```
+    spec:
+      containers:
+      - name: goserver
+        image: fabiobione/hello-go:v5.3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          periodSeconds: 3
+          failureThreshold: 1
+          initialDelaySeconds: 10
+        # livenessProbe:
+        #   httpGet:
+        #     path: /healthz
+        #     port: 8000
+        #   periodSeconds: 5
+        #   failureThreshold: 1
+        #   timeoutSeconds: 1
+        #   successThreshold: 1
+```
+
+Agora vamos aplicar o deployment e observar que apenas após 10 segundos a aplicação será considerada pronta
+
+```
+kubectl apply -f k8s/deployment.yaml && watch -n1 kubectl get pods
+```
