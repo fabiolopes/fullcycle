@@ -934,3 +934,68 @@ root@goserver-749cb49946-hgd6c:/go#
 ```
 
 Poidemos ver dessa forma que de fato o arquivo criado no volume está persistido.
+
+
+### Criando pods ordenados com statefulsets
+
+Imagine um cenário onde Temos que criar um banco de dados, sendo 1 pod principal e alguns slaves dessa base de dados. Para esse cenário, seria importante garantir a seguinte ordem: a primeira subida ser o pod principal, da base, e o restante sequencialmente. Da mesma forma, quando for excluir ou desescalar, excluir do maior para o menor, como uma pilha. Isso é possível usando statefulset. Vamos criar o exemplo proposto, baseado no mysql, com 5 réplicas. O comportamento será parecido com o de um deployment, mas a escala será ordenada.
+
+statefulset.yaml:
+```
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: goserver-h
+  replicas: 5
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+```
+
+Aplicando o arquivo:
+
+```
+fabio@DESKTOP-213:~/fullcycle/kubernetes$ kubectl apply -f k8s/statefulset.yaml
+statefulset.apps/mysql created
+```
+
+Podemos ver aqui que os names seguiram uma sequencia.
+
+```
+fabiobione@DESKTOP-4KRU5T4:~/fullcycle/kubernetes$ kubectl get po
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-749cb49946-hgd6c   1/1     Running   0          33m
+mysql-0                     1/1     Running   0          2m53s
+mysql-1                     1/1     Running   0          117s
+mysql-2                     1/1     Running   0          65s
+mysql-3                     1/1     Running   0          15s
+mysql-4                     1/1     Running   0          14s
+```
+
+
+Apenas a título de exploração, vamos setar apenas 4 réplicas manualmente e ver se ele excluirá o mysql-4:
+
+```
+fabio@DESKTOP-34:~/fullcycle/kubernetes$ kubectl scale statefulset mysql --replicas=4
+statefulset.apps/mysql scaled
+fabio@DESKTOP-34:~/fullcycle/kubernetes$ kubectl get po
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-749cb49946-hgd6c   1/1     Running   0          41m
+mysql-0                     1/1     Running   0          10m
+mysql-1                     1/1     Running   0          9m26s
+mysql-2                     1/1     Running   0          8m34s
+mysql-3                     1/1     Running   0          7m44s
+```
