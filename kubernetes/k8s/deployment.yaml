@@ -16,7 +16,16 @@ spec:
     spec:
       containers:
       - name: goserver
-        image: fabiobione/hello-go:v5.4
+        image: fabiobione/hello-go:v6
+
+        resources:
+          requests:
+            cpu: "0.05"
+            memory: 20Mi
+          limits:
+            cpu: "0.05"
+            memory: 25Mi
+
         startupProbe:
           httpGet:
             path: /healthz
@@ -46,8 +55,13 @@ spec:
         volumeMounts:
           - mountPath: "/go/myFamily"
             name: config
+          - mountPath: "/go/pvc"
+            name: goserver-volume
 
       volumes:
+        - name: goserver-volume
+          persistentVolumeClaim:
+            claimName: goserver-pvc
         - name: config
           configMap:
             name: configmap-family

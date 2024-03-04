@@ -19,7 +19,7 @@ kubectl describe <tipo> <objeto>
 kubectl rollout history <tipo> <objeto>
 
 
-###Considerações deployments
+### Considerações deployments
 
 ```
 <!-->Exemplo de deployment<-->
@@ -691,3 +691,246 @@ kubectl apply -f k8s/deployment.yaml && watch -n1 kubectl get pods
 ```
 
 O que perceberemos é que após os 10 segundos, a aplicação/container estará disponível. E, após os 30 segundos, não estará disponível por conta do reeadinessProbe, e depois será reiniciado como efeito do livenessProbe, e aí começamos novamente com o startupProbe.
+
+
+## Preparativos para trabalhar com recursos
+
+### Instalando metrics-server
+
+O metrics server é um servidor de métricas. Vamos instalar ele no kind, mas precisaremos fazer uma adaptação para isso, pois o metris-server precisa de uma conexão de containeres segura, e para isso vamos inserir no components.yml uma flag para permitir conexões não seguras.
+
+Primeiro vamos baixar o arquivo componentes, e depois renomear, para não confundirmos.
+
+```
+wget https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+mv components.yaml metrics-server.yaml
+```
+
+Agora vamos abrir o arquivo, e procurar no deployment __kind: Deployment__, e aonde houver __- args:__ vamos adicionar a flag --kubelet-insecure-tls:
+
+```
+      - args:
+        - --cert-dir=/tmp
+        - --secure-port=10250
+        - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+        - --kubelet-use-node-status-port
+        - --metric-resolution=15s
+        - --kubelet-insecure-tls
+```
+
+Após isso, vamos executar o apply do arquivo yaml. E também verificar apiservices. Destque para o service _kube-system/metrics-server_, que precisa estar disponível.
+
+```
+kubectl apply -f metrics-server.yaml
+
+
+fabio@DESKTOP-34536345:~/fullcycle/kubernetes/k8s$ kubectl get apiservices
+NAME                                   SERVICE                      AVAILABLE   AGE
+v1.                                    Local                        True        107d
+v1.admissionregistration.k8s.io        Local                        True        107d
+v1.apiextensions.k8s.io                Local                        True        107d
+v1.apps                                Local                        True        107d
+v1.authentication.k8s.io               Local                        True        107d
+v1.authorization.k8s.io                Local                        True        107d
+v1.autoscaling                         Local                        True        107d
+v1.batch                               Local                        True        107d
+v1.certificates.k8s.io                 Local                        True        107d
+v1.coordination.k8s.io                 Local                        True        107d
+v1.discovery.k8s.io                    Local                        True        107d
+v1.events.k8s.io                       Local                        True        107d
+v1.networking.k8s.io                   Local                        True        107d
+v1.node.k8s.io                         Local                        True        107d
+v1.policy                              Local                        True        107d
+v1.rbac.authorization.k8s.io           Local                        True        107d
+v1.scheduling.k8s.io                   Local                        True        107d
+v1.storage.k8s.io                      Local                        True        107d
+v1beta1.metrics.k8s.io                 kube-system/metrics-server   True        106s
+v1beta2.flowcontrol.apiserver.k8s.io   Local                        True        107d
+v1beta3.flowcontrol.apiserver.k8s.io   Local                        True        107d
+v2.autoscaling                         Local                        True        107d
+```
+
+### Conceito de vCPU
+
+Trata-se de unidade de medida medida por milicore, onde 100m equivale a 1 cpu completo. 500m seria metade de um cpu. 
+
+
+### Resources
+
+Vamos definir os recursos mínimos de nossos pods, e o limite de utilização, tanto de memória quanto cpu:
+
+```
+      containers:
+      - name: goserver
+        image: fabiobione/hello-go:v5.4
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 20Mi
+          limits:
+            cpu: 500m
+            memory: 25Mi
+```
+
+Agora iremos aplicar a atualização:
+
+```
+kubectl apply -f deployment.yaml
+```
+
+Vamos fazer um top no pod para ver quanto de recursos está utilizando.
+
+```
+fabio@DESKTOP-dsdsdfd:~/fullcycle/kubernetes/k8s$ kubectl top pod goserver-5bb75f99bd-rf8m4
+NAME                        CPU(cores)   MEMORY(bytes)
+goserver-5bb75f99bd-rf8m4   5m           2Mi
+```
+
+### Horizontal Auto Scaler (HPA)
+
+HPA é um tipo de objeto que controla, via configurações, quantidade mínima e máxima de escalabilidade de um deployment (ou outro tipo), como escala mínima é maxima, e critérios de escala e desescala.
+
+Veremos um kind hpa com definição de replicas e  critério de escala baseado na utilização de CPU:
+
+Para esse teste, usaremos uma versão do serve.go, apenas trocando _if duration.Seconds() < 10 || duration.Seconds() > 30 {_ por _if duration.Seconds() < 10 {_. Dessa forma, pararemos de tomar erro após 30 segundos, que provocar reinicialização até dar crash na aplicação.
+
+Poderemos ver que estamos aplicando em _scaleTargetRef>kind_ e _scaleTargetRef>name_, ou seja, estamos aplicando essa auto escala no deployment de nome goserver.
+
+```
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: goserver-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: goserver
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+```
+
+```
+kubectl apply -f hpa.yaml
+
+fabio@DESKTOP-gfgdfgdf454:~/fullcycle/kubernetes/k8s$ kubectl get hpa
+NAME           REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   1%/75%    1         5         1          9m53s
+```
+
+### Testando o hpa através de teste de stress Fortio
+
+ [Github fortio](https://github.com/fortio/fortio). Para estressar nossa aplicação, e assim ver ele escalar, vamos fazer várias requisições com ajuda do Fortio, ferramenta de testes de estress.
+  Vamo solicitar ao kubectl que rode um pod da imagem do fortio, carregando alguns parâmetros próprios dele, como determinando 800 requisições por segundo (qps), e isso por 120 segundos (t), e isso será executado por 70 processos simultâneos (c), na nossa url de Helthz. 
+
+  ```
+  kubectl run -it fortio --rm --image=fortio/fortio -- load -qps 800 -t 120s -c 70 "http://goserver-service/healthz"
+  ```
+
+Nesse caso, podemos acompanhar as escalas de replicas através do comando:
+
+```
+watch -n1 kubectl get hpa
+NAME           REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   2%/75%    1         5         3          51m
+```
+
+### Volume persistente com PersistentVolumeClaim
+
+PersistentVolumeClaim é um tipo que usamos para solicitar um volume persistente, que poderá ser usado por containeres.
+
+Vamos criar um volume de 5gb para ser utilizado pelo goserver.
+
+```
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: goserver-pvc
+spec:
+  resources:
+    requests:
+      storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+```
+
+Podemos perceber que a nossa claim está pendente, e o motivo pode ser visto na storageclass, que está aguardando a primeira utilização do storage para ser criado.
+
+```
+kubectl apply -f k8s/pvc.yaml
+fabio@DESKTOP-123242:~/fullcycle/kubernetes$ kubectl get pvc
+NAME           STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+goserver-pvc   Pending                                      standard       22s
+fabio@DESKTOP-123242:~/fullcycle/kubernetes$ kubectl get storageclass
+NAME                 PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+standard (default)   rancher.io/local-path   Delete          WaitForFirstConsumer   false
+     140d
+```
+
+
+Agora vamos adicionar esse volume no deployment, adicionando em volumeMounts. Primeiro vamos adicionar em volumes o persistentVolumeClaim goserver-pvc, criado no passo anterior, após, adicionaremos esse volume criado em volumeMounts:
+
+```
+...
+        volumeMounts:
+          - mountPath: "/go/myFamily"
+            name: config
+          - mountPath: "/go/pvc"
+            name: goserver-volume
+... 
+      volumes:
+        - name: goserver-volume
+          persistentVolumeClaim:
+            claimName: goserver-pvc
+```
+
+Agora vamos aplicar o deployment.
+
+```
+kubectl apply -f k8s/deployment.yaml
+```
+
+Após isso, podemos verificar que o pvc criado mudou de status, visto que agora foi requisitado deplo nosso deployment:
+
+```
+fabio@DESKTOP-34565436:~/fullcycle/kubernetes$ kubectl get pvc
+NAME           STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+goserver-pvc   Bound    pvc-c50dadee-5248-4759-a7d7-6f01e1b6b051   5Gi        RWO            standard       14m
+```
+
+Façamos um teste de volume. Vamos entrar num container, na pasta pvc mapeada pelo volume e criar um arquivo. Após isso iremos deletar o pod. Se tudo der certo, no pod que será criado, deverá ter esse arquivo dentro da mesma pasta, mesmo sendo um novo pod:
+
+```
+fabiobione@DESKTOP-4KRU5T4:~/fullcycle/kubernetes$ kubectl exec -it goserver-749cb49946-svgt6 -- bash
+root@goserver-749cb49946-svgt6:/go# ls
+bin  myFamily  pvc  server  server.go  src
+root@goserver-749cb49946-svgt6:/go# cd pvc
+root@goserver-749cb49946-svgt6:/go/pvc# touch oi
+root@goserver-749cb49946-svgt6:/go/pvc# ls
+oi
+exit
+
+
+fabio@DESKTOP-2345:~/fullcycle/kubernetes$ kubectl delete pod goserver-749cb49946-svgt6
+pod "goserver-749cb49946-svgt6" deleted
+```
+
+Pegaremos outro pod dentro do contexto goserver:
+
+```
+fabio@DESKTOP-1:~/fullcycle/kubernetes$ kubectl get pods
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-749cb49946-hgd6c   1/1     Running   0          39s
+
+fabio@DESKTOP-23:~/fullcycle/kubernetes$ kubectl exec -it goserver-749cb49946-hgd6c -- bash
+root@goserver-749cb49946-hgd6c:/go# ls
+bin  myFamily  pvc  server  server.go  src
+root@goserver-749cb49946-hgd6c:/go# ls pvc
+oi
+root@goserver-749cb49946-hgd6c:/go#
+```
+
+Poidemos ver dessa forma que de fato o arquivo criado no volume está persistido.
