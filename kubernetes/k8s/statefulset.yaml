@@ -3,7 +3,7 @@ kind: StatefulSet
 metadata:
   name: mysql
 spec:
-  serviceName: goserver-h
+  serviceName: mysql-h
   replicas: 5
   selector:
     matchLabels:

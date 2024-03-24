@@ -947,7 +947,7 @@ kind: StatefulSet
 metadata:
   name: mysql
 spec:
-  serviceName: goserver-h
+  serviceName: mysql-h
   replicas: 5
   selector:
     matchLabels:
@@ -999,3 +999,63 @@ mysql-1                     1/1     Running   0          9m26s
 mysql-2                     1/1     Running   0          8m34s
 mysql-3                     1/1     Running   0          7m44s
 ```
+
+### Criando headless services
+
+Em alguns cenários iremos querer controlar as réplicas via nomenclatura, e não endereços. Imagine um cenário onde temos 5 pods do mysql. Queremos que o 1º seja apenas de gravação, e o restante de leitura. Uma alterantiva seria criar uma service headless, sem ip externo, onde o dns do kubernetes irá resolver qual pod será selecionado via nomenclarura.
+
+Vamo criar um service simples. O diferencial nesse caso será que ele não terá valor definido para clusterIp (clusterIP: None).
+
+mysql-service-h.yaml
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-h
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+  clusterIP: None
+```
+
+Note que o name bate com o name do statefulset, garantindo que o statefulset irá usar o serviço que criaremos.
+
+Vamos aplicar os arquivos:
+
+```
+fabio@DESKTOP-435:~/fullcycle/kubernetes$ kubectl apply -f k8s/statefulset.yaml
+statefulset.apps/mysql created
+fabio@DESKTOP-435:~/fullcycle/kubernetes$ kubectl apply -f k8s/mysql-service-h.yml
+service/mysql-h created
+fabio@DESKTOP-435:~/fullcycle/kubernetes$ kubectl get service
+NAME               TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+goserver-service   ClusterIP   10.96.239.77   <none>        80/TCP     83d
+kubernetes         ClusterIP   10.96.0.1      <none>        443/TCP    160d
+mysql-h            ClusterIP   None           <none>        3306/TCP   7s
+fabio@DESKTOP-435:~/fullcycle/kubernetes$ kubectl get statefulset
+NAME    READY   AGE
+mysql   5/5     27s
+fabio@DESKTOP-435:~/fullcycle/kubernetes$ kubectl get pods
+NAME                        READY   STATUS    RESTARTS      AGE
+goserver-749cb49946-hgd6c   1/1     Running   2 (18m ago)   19d
+mysql-0                     1/1     Running   0             2m7s
+mysql-1                     1/1     Running   0             2m4s
+mysql-2                     1/1     Running   0             2m2s
+mysql-3                     1/1     Running   0             2m
+mysql-4                     1/1     Running   0             117s
+```
+
+Agora faremos o seguinte: Vamos acessar o bash do pod goserver-749cb49946-hgd6c, e dentro dele iremos pingar o primeiro pod do mysql nomenclatura <nome-pod>.<nome-service>. Ou seja, para acessar o 1º daremos _ping mysql-0.mysql-h_, e o 2º _ping mysql-1.mysql-h_.
+
+```
+kubectl exec -it goserver-749cb49946-hgd6c -- bash
+
+root@goserver-749cb49946-hgd6c:/go# ping mysql-0.mysql-h
+PING mysql-0.mysql-h.default.svc.cluster.local (10.244.3.4) 56(84) bytes of data.
+64 bytes from mysql-0.mysql-h.default.svc.cluster.local (10.244.3.4): icmp_seq=1 ttl=62 time=0.099 ms
+64 bytes from mysql-0.mysql-h.default.svc.cluster.local (10.244.3.4): icmp_seq=2 ttl=62 time=0.084 ms
+```
+
+Dessa forma, seria simples chamar separadamente os pods tanto de escrita (mysql-0.mysql-h) quanto de leitura, sendo do índice 1 ao 4.
