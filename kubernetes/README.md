@@ -1059,3 +1059,59 @@ PING mysql-0.mysql-h.default.svc.cluster.local (10.244.3.4) 56(84) bytes of data
 ```
 
 Dessa forma, seria simples chamar separadamente os pods tanto de escrita (mysql-0.mysql-h) quanto de leitura, sendo do índice 1 ao 4.
+
+
+### Criação de volumes dinâmicos com statefulset
+
+Dentro do nosso statefulset, podes criar volumes dinamicamente para cada pod associado, usando volumeClaimTemplates, que será referenciado no nosso containers, via volumeMounts. Vej abaixo como fica:
+
+statefulset.yaml
+```
+...
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+          volumeMounts:
+            - mountPath: /var/lib/mysql
+              name: mysql-volume
+
+
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-volume
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+```
+
+Criamos o volumeClaimTemplate mysql-volume, e dentro de volumeMounts, o referenciamos como volume dos pods desse container. Vamos agora aplicar e ver os efeitos:
+
+```
+fabiobione@DESKTOP-4KRU5T4:~/fullcycle/kubernetes$ kubectl apply -f k8s/statefulset.yaml
+statefulset.apps/mysql created
+fabiobione@DESKTOP-4KRU5T4:~/fullcycle/kubernetes$ kubectl get pods
+NAME                        READY   STATUS    RESTARTS       AGE
+goserver-749cb49946-hgd6c   1/1     Running   2 (128m ago)   20d
+mysql-0                     1/1     Running   0              11m
+mysql-1                     1/1     Running   0              11m
+mysql-2                     1/1     Running   0              10m
+mysql-3                     1/1     Running   0              10m
+mysql-4                     1/1     Running   0              10m
+fabiobione@DESKTOP-4KRU5T4:~/fullcycle/kubernetes$ kubectl get pvc
+NAME                   STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+goserver-pvc           Bound    pvc-c50dadee-5248-4759-a7d7-6f01e1b6b051   5Gi        RWO            standard       20d
+mysql-volume-mysql-0   Bound    pvc-6f5ddb93-df08-4621-b9c6-712710b94490   5Gi        RWO            standard       14m
+mysql-volume-mysql-1   Bound    pvc-b03b8fb4-427b-4552-b602-612ef96372fb   5Gi        RWO            standard       14m
+mysql-volume-mysql-2   Bound    pvc-e9c30387-7bd5-415a-8c7f-2c481a536747   5Gi        RWO            standard       13m
+mysql-volume-mysql-3   Bound    pvc-188400d5-59f3-4ce2-a95a-978dcd4c02b9   5Gi        RWO            standard       13m
+mysql-volume-mysql-4   Bound    pvc-fe3519cc-b0c0-4931-ac8f-8cc62016645b   5Gi        RWO            standard       13m
+```
+
+Podemos ver a criação de 5 pods, e também de 5 volumes montados, 1 para cada pod.
