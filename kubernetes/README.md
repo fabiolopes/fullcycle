@@ -1115,3 +1115,62 @@ mysql-volume-mysql-4   Bound    pvc-fe3519cc-b0c0-4931-ac8f-8cc62016645b   5Gi  
 ```
 
 Podemos ver a criação de 5 pods, e também de 5 volumes montados, 1 para cada pod.
+
+
+### Cert manager (TLS)
+
+Para exemplificarmos, vamos criar o namespace cert-manager:
+
+```
+fabio@DESKTOP-34:~$ kubectl create namespace cert-manager
+
+namespace/cert-manager created
+```
+
+Agora vamos seguir a instrução contida no [site de instrução.](https://cert-manager.io/docs/installation/kubectl/)
+
+```
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+```
+
+Após isso, podemos ver alguns pods criados pelo cert-manager:
+
+```
+fabio@DESKTOP-534:~$ kubectl get pods -n cert-manager
+NAME                                       READY   STATUS              RESTARTS   AGE
+cert-manager-7fb948f468-kt6c9              0/1     ContainerCreating   0          43s
+cert-manager-cainjector-75c5fc965c-4lc74   1/1     Running             0          43s
+cert-manager-webhook-757c9d4bb7-f7vrz      0/1     ContainerCreating   0          43s
+```
+
+Com o cert-manager instaldo, usaremos o objeto ClusterIssuer para criar o gerador de certificados: 
+
+cluster-issuer.yml:
+```
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+  namespace: cert-manager
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: fabiolopesbione@hotmail.com
+    privateKeySecretRef:
+      name: letsencrypt-tls
+    solvers:
+    - http01:
+        ingress:
+          ingressClassName: nginx
+```
+
+Agora aplicaremos o arquivo:
+
+```
+kubectl apply -f k8s/cluster-issuer.yml
+```
+
+E pronto. Agora podemos em qualquer ingress informar esse issuer letsencrypt para gerar certificado tls para o domíniocom as seguintes annotations dentro do yml do ingress.
+
+```
+cert-manager.io/cluster-issuer: "letsencrypt"
