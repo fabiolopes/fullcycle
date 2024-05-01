@@ -1260,3 +1260,41 @@ fabio@DESKTOP-434:~/fullcycle/kubernetes/k8s/namespaces$ kubectl get pods
 NAME                      READY   STATUS    RESTARTS   AGE
 server-7c97dd76cc-btzwx   1/1     Running   0          22m
 ```
+
+
+### Service accounts
+Dentro do kubernetes, o conceito de service account delimita o que um usuário tem permissão de fazer dentro de um cluster.
+
+O service acount padrão é o default. Caso se crie objetos do kubernetes sem essa definição, estará no service account default, que não restringe em nada.
+
+Vamos criar um serviceaccount, com role.
+
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: server-read
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "watch", "list"]
+  
+```
+
+Podemos ver que criamos para o serviceaccount server a role server-read, com algumas regras de quem estiver com essa role, espeficicamente para pods, services e deployments. Agora vamos aplicar o arquivo criado.
+
+security.yml
+```
+fabio@DESKTOP-43:~/fullcycle/kubernetes/k8s/namespaces$ kubectl apply -f security.yml
+serviceaccount/server created
+```
