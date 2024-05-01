@@ -1288,13 +1288,78 @@ rules:
 - apiGroups: ["apps"]
   resources: ["deployments"]
   verbs: ["get", "watch", "list"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: server-read-binding
+subjects:
+- kind: ServiceAccount
+  name: server
+  namespace: prod
+roleRef:
+  kind: Role
+  name: server-read
+  apiGroup: rbac.authorization.k8s.io
   
 ```
 
-Podemos ver que criamos para o serviceaccount server a role server-read, com algumas regras de quem estiver com essa role, espeficicamente para pods, services e deployments. Agora vamos aplicar o arquivo criado.
-
+Podemos ver que criamos para o serviceaccount server a role server-read, com algumas regras de quem estiver com essa role, espeficicamente para pods, services e deployments. Também criamos um RoleBinding associando o server à role criada. Agora vamos aplicar o arquivo criado.
+ 
 security.yml
 ```
 fabio@DESKTOP-43:~/fullcycle/kubernetes/k8s/namespaces$ kubectl apply -f security.yml
 serviceaccount/server created
+```
+Agora que criamos essa estrutura do serviceaccount com role associada, vamos referenciar esse serviceaccount no nosso deployment recentemente criado:
+
+```
+    spec:
+      serviceAccount: server
+      containers:
+```
+
+
+Agora, ao aplicar o deployment, ele terá essa rpoteção dada via serviceaccount.
+
+### Diferença entre Role e ClusterRole
+
+Como pudemos ver, o Role trata especificamente de regras dentro de um namespace. Se quisermos aplicar essa role mais amplamente, como a nível de cluster, podemos então criar o ClusterRole.
+
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: server-read
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "watch", "list"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: server-read-binding
+subjects:
+- kind: ServiceAccount
+  name: server
+  namespace: prod
+roleRef:
+  kind: ClusterRole
+  name: server-read
+  apiGroup: rbac.authorization.k8s.io
 ```
