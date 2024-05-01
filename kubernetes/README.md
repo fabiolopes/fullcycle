@@ -1174,3 +1174,89 @@ E pronto. Agora podemos em qualquer ingress informar esse issuer letsencrypt par
 
 ```
 cert-manager.io/cluster-issuer: "letsencrypt"
+```
+
+
+### Conceito de namespaces
+
+Namespaces são tags que categorizam um agrupamento (dev, prod, ...). Funciona como um agrupador lógico de objetos dentro do kubernetes.
+
+```
+kubectl apply -f deployment.yml -n=dev
+
+fabio@DESKTOP-3243:~/fullcycle/kubernetes/k8s/namespaces$ kubectl get pods -n=dev
+NAME                      READY   STATUS    RESTARTS   AGE
+server-7c97dd76cc-btzwx   1/1     Running   0          3m17s
+```
+
+### Contextos por namespace
+
+Um contexto define o cluster configurado para o kubernetes.
+
+```
+# Arquivo de configuração de contexto
+cat ~/.kube/config
+```
+
+```
+fabio@DESKTOP-5464:~/fullcycle/kubernetes/k8s/namespaces$ kubectl config current-context
+kind-fullcycle
+```
+
+#### Criando contextos
+
+Para criar contexto, devemos passar o namespace, cluster e o nome do usuário. Criaremos 2 contexts, dev e prod:
+
+```
+fabio@DESKTOP-54:~/fullcycle/kubernetes/k8s/namespaces$ kubectl config set-context dev --nam
+espace=dev --cluster=kind-fullcycle --user=kind-fullcycle
+Context "dev" created.
+fabio@DESKTOP-54:~/fullcycle/kubernetes/k8s/namespaces$ kubectl config set-context prod --namespace=prod --cluster=kind-fullcycle --user=kind-fullcycle
+Context "prod" created.
+```
+
+Agora, se olharmos as configurações em nosso kube, veremos o contexto que criamos no início, somado aos novos recém criados:
+
+```
+fabio@DESKTOP-543:~/fullcycle/kubernetes/k8s/namespaces$ kubectl config view
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://127.0.0.1:41553
+  name: kind-fullcycle
+contexts:
+- context:
+    cluster: kind-fullcycle
+    namespace: dev
+    user: kind-fullcycle
+  name: dev
+- context:
+    cluster: kind-fullcycle
+    user: kind-fullcycle
+  name: kind-fullcycle
+- context:
+    cluster: kind-fullcycle
+    namespace: prod
+    user: kind-fullcycle
+  name: prod
+current-context: kind-fullcycle
+kind: Config
+preferences: {}
+users:
+- name: kind-fullcycle
+  user:
+    client-certificate-data: DATA+OMITTED
+    client-key-data: DATA+OMITTED
+```
+Podemos mudar o contexto atual para dev, e assim conseguimos ver inclusive o pod ue criamos para o namespace dev, configurado para esse contexto:
+
+```
+fabio@DESKTOP-434:~/fullcycle/kubernetes/k8s/namespaces$ kubectl config use-context dev
+Switched to context "dev".
+fabio@DESKTOP-434:~/fullcycle/kubernetes/k8s/namespaces$ kubectl config current-context
+dev
+fabio@DESKTOP-434:~/fullcycle/kubernetes/k8s/namespaces$ kubectl get pods
+NAME                      READY   STATUS    RESTARTS   AGE
+server-7c97dd76cc-btzwx   1/1     Running   0          22m
+```
