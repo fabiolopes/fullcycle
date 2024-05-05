@@ -143,3 +143,60 @@ NAME                     READY   STATUS    RESTARTS   AGE
 nginx-57f79d6686-kzsvk   2/2     Running   0          5m27s
 
 ```
+
+
+### Addons importantes para incrementar
+
+Na página do [istio getting started](https://istio.io/latest/docs/setup/getting-started/#dashboard) temos o [github de samples](https://github.com/istio/istio/tree/release-1.21/samples/addons). Vamos instalar as seguintes ferramentas:
+
+* grafana - Plataforma visual de métricas de 
+aplicações;
+* jaeger - É um mecanismo para rastreamento de requisições de uma requisição/serviço;
+* kiali - Interface gráfina para observabilidade de serviços de rede;
+
+Vamos executar na ordem de funcionamento, usando o raw dos arquivos hospedados no github:
+
+
+```
+#prometheus
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.21/samples/addons/prometheus.yaml
+. . . 
+#kiali
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.21/samples/addons/kiali.yaml
+. . . 
+#jaeger
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.21/samples/addons/jaeger.yaml
+. . .
+#grafana
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.21/samples/addons/grafana.yaml
+```
+
+Olhando o conteúdo desses deployments podemos observar que estão sendo aplicados no namespace istio-system. Vamos dar uma olhada nmos pods criados nesse namespace:
+
+```
+fabio@DESKTOP-345:~/fullcycle/istio$ kubectl get pods -n istio-system
+NAME                                    READY   STATUS              RESTARTS   AGE
+istiod-5668557955-t2t85                 1/1     Running             0          3d22h
+istio-ingressgateway-84cd7548bb-bsjcj   1/1     Running             0          3d22h
+prometheus-7545dd48db-rftbh             0/2     ContainerCreating   0          6m23s
+jaeger-7d7d59b9d-lw65w                  0/1     ContainerCreating   0          3m40s
+grafana-6f68dfd8f4-jzm56                0/1     ContainerCreating   0          2m27s
+kiali-588bc98cd-b2cnl                   1/1     Running             0          5m31s
+```
+
+#### Vendo o dashboard do kiali
+
+Executamos o seguinte comando:
+
+```
+fabio@DESKTOP-45:~/fullcycle/istio$ istioctl dashboard kiali
+http://localhost:20001/kiali
+```
+
+Se o browser não abrir automaticamente, podemos acessar a url http://localhost:20001/kiali no browser. Vamos ver como é a página inicial:
+
+![kiali](./kiali-pg-inicial.png)
+
+Vamos dar também uma olhada na aba Graphs, onde ao selecionar o namespace default e permitir display "idles nodes" conseguiremos ver o node de kubernetes e nginx.
+
+![kiali-nodes](./kiali-idle-nodes.png)
