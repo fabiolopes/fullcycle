@@ -195,8 +195,212 @@ http://localhost:20001/kiali
 
 Se o browser não abrir automaticamente, podemos acessar a url http://localhost:20001/kiali no browser. Vamos ver como é a página inicial:
 
-![kiali](./kiali-pg-inicial.png)
+![kiali](./imgs/kiali-pg-inicial.png)
 
 Vamos dar também uma olhada na aba Graphs, onde ao selecionar o namespace default e permitir display "idles nodes" conseguiremos ver o node de kubernetes e nginx.
 
-![kiali-nodes](./kiali-idle-nodes.png)
+![kiali-nodes](./imgs/kiali-idle-nodes.png)
+
+### Reforçando conceitos do istio
+
+* __Ingress gateway__ - Controlador de entrada de requisições em um serviço
+
+* __Virtual service__ - Camada virtual complementar ao service do kubernetes que permite configurações de roteamento de um serviço
+
+* __Destination rules__ - Set de regras para configurar o que acontece com o tráfego quando chega em determinado destino.
+
+Agora, para pôr a mão na massa, vamos criar um arquivo deployment do nginx, 1 com nome nginx, e a imagem wesleywillians/nginx-ab, outro com nome nginx-b, e a imagem wesleywillians/nginx-ab:b. Ambos atendem pela label nginx. Criaremos também um service para acessar os apps da label nginx, e vamos ver o comportamento das requisições:
+
+deployment.yml:
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: wesleywillians/nginx-ab
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 80
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-b
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: wesleywillians/nginx-ab:b
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 80
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx
+  ports:
+  - port: 8000
+    targetPort: 80
+    nodePort: 30000
+
+```
+
+Aplicaremos o arquivo:
+
+```
+fabio@DESKTOP-343:~/fullcycle/istio$ kubectl apply -f .
+deployment.apps/nginx unchanged
+deployment.apps/nginx-b created
+service/nginx-service created
+```
+
+Agora vamos fazer algumas requisições na url da aplicação e ver como serão as chamadas:
+
+```
+fabio@DESKTOP-455:~/fullcycle/istio$ while true;do curl http://localhost:8000; echo; sleep 0.
+5; done;
+Full Cycle B
+Full Cycle B
+Full Cycle B
+Full Cycle A
+Full Cycle A
+Full Cycle B
+Full Cycle B
+Full Cycle B
+Full Cycle A
+Full Cycle B
+Full Cycle A
+Full Cycle B
+```
+
+
+Vamos modificar o arquivo deployment. Adicionando no primeiro a version A, e no segundo a version B para diferenciar.
+
+```
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+        version: A
+. . . 
+
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+        version: B
+```
+
+
+Agora comando de apply:
+```
+fabio@DESKTOP-343:~/fullcycle/istio$ kubectl apply -f .
+```
+
+E vamos executar o script while, e o comando de dashboard para ver a diferenciação de tráfego.
+
+```
+while true;do curl http://localhost:8000; echo; sleep 0.5; done;
+. . .
+
+fabio@DESKTOP-544:~$ istioctl dashboard kiali
+http://localhost:20001/kiali
+```
+
+Agora acessando o Graph do dashboard, veremos o seguinte:
+
+![istio A e B](./imgs/kiali-istio-a-b.png)
+
+
+### Deploy canário
+
+Deploy canário é uma estratégia de atualização de versão suavizada, a fim de consolidar a mudança aos poucos. 
+
+Pensando em executar isso usando kubernetes, imagine uma aplicação que já esteja na versão 1.0 em produção. Essa aplicação poderia ter 10 réplicas. Ao subir a nova versão 1.1, podemos manter a versão 1.0 com 8 réplicas, e a 1.1. terá 2 réplicas. De forma automática, o load balancer irá jogar em média 80% das requisições para os pods de 1.0, e 20% da 1.1. Você terá um grupo menorde requisições provando da nova implementação e em exposição a possíveis falhas. Mas a maioria dos usuário não terão impacto. Conforme for validando a nova implementação 1.1., podemos subtrair pods da 1.0, adicionando na 1.1. Até a 1.1 obter todos os 10 pods.
+
+Para fazer isso, poderíamos alterar no deployment o campo réplicas.
+
+Se formos aplicar a lógica de distribuição de requisições com istio, tendo cada deploy 1 réplica, temos a seguinte forma:
+
+Em Graph, no lado direito, selecionamos o menu de contexto e Details do service.
+![istio-service](./imgs/istio-service-details.png)
+
+Em Actions, selecionamos Traffic shifting
+![istio-traffic](./imgs/istio-traffic-shifting.png)
+
+Agora selecionamos o peso da disteribuição de tráfego.
+![istio-sifting-aplicado](./imgs/istio-traffic-shifting-aplicado.png)
+
+
+#### Executando carga de requisições com o Fortio
+
+Na documentação do istio, temos a descrição de instalação do Fortio para testarmos o tráfego, na seção [circuit-breaking](https://istio.io/latest/docs/tasks/traffic-management/circuit-breaking/). Nela temos os comando de criação do container do Fortio:
+
+```
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.21/samples/httpbin/sample-client/fortio-deploy.yaml
+. . . 
+export FORTIO_POD=$(kubectl get pods -l app=fortio -o 'jsonpath={.items[0].metadata.name}')
+```
+
+Agora vamos rodar requisições do fortio por 200 segundos:
+
+```
+kubectl exec "$FORTIO_POD" -c fortio -- fortio load -c 2 -qps 0 -t 200s -loglevel Warning http://nginx-service:8000
+```
+
+Vamos rodar também o kiali para ver os detalhes:
+
+```
+fabio@DESKTOP-2134:~$ istioctl dashboard kiali
+http://localhost:20001/kiali
+Failed to open browser; open http://localhost:20001/kiali in your browser.
+```
+
+Agora vamos mudar as configurações de tráfego novamente no traffic shifting:
+
+![10_90](./imgs/kiali-10_90.png)
+
+O resultado é que as requisições vão se distribuir naturalmente conforme configuramos:
+
+![graph_10_90](./imgs/kiali-graph_90_10.png)
