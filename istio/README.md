@@ -404,3 +404,102 @@ Agora vamos mudar as configurações de tráfego novamente no traffic shifting:
 O resultado é que as requisições vão se distribuir naturalmente conforme configuramos:
 
 ![graph_10_90](./imgs/kiali-graph_90_10.png)
+
+
+### Configurando um virtual service e destination rule para controle de carga via yml
+
+No passo anterior executamos configuração manual no kiali para definir a carga. Por baixo dos panos são criados arquivos yml. Vamos criar esses arquivos para serem gerados via kubectl.
+
+Primeiro iremos configurar um arquivo de __DestinationRule__.
+
+```
+#ds.yml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: nginx-dr
+spec:
+  host: nginx-service
+  subsets:
+    - name: v1
+      labels:
+        version: A
+    - name: v2
+      labels:
+        version: B
+```
+
+Configuramos a ruleset v1 para a versão A, e a v2 para a version B. Agora definiremos o VirtualService, que irá utilizar essas destinações com carga definida:
+
+```
+#vs.yml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: nginx-vs
+spec:
+  hosts:
+  - nginx-service
+  http:
+    - route:
+      - destination:
+          host: nginx-service
+          subset: v1
+        weight: 90
+      - destination:
+          host: nginx-service
+          subset: v2
+        weight: 10
+```
+
+Nesse caso, configuramos para o subset v1, peso 90, e peso 10 para o subset v2. Agora daremos apply em todos os arquivos criados:
+
+```
+fabio@DESKTOP-23424:~/fullcycle/istio$ kubectl apply -f .
+deployment.apps/nginx unchanged
+deployment.apps/nginx-b unchanged
+service/nginx-service unchanged
+destinationrule.networking.istio.io/nginx-dr created
+virtualservice.networking.istio.io/nginx-vs created
+```
+
+Iremo agora rodar o kiali dashboar, bem como executaremos o teste de carga com o fortio, isso em terminais diferentes, visto que esses comandos travam o terminal:
+
+```
+kubectl exec "$FORTIO_POD" -c fortio -- fortio load -c 2 -qps 0 -t 200s -loglevel Warning http://nginx-service:8000
+
+istioctl dashboard kiali
+```
+
+Se tudo der certo, a distribuição no Graph do kiali mostrará a divisão de tráfego aproximada de 90/10.
+
+
+### Configurando algoritmos de load balancer
+
+Por padrão, o algoritmo utilizado para fazer o balanceamento é round robin, mas temos outros, como least connection, random. Vamos configurar o destination rule com essa definição:
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: nginx-dr
+spec:
+  host: nginx-service
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+  subsets:
+    - name: v1
+      labels:
+        version: A
+      trafficPolicy:
+        loadBalancer:
+          simple: LEAST_CONN
+    - name: v2
+      labels:
+        version: B
+```
+
+Ao aplicar o arquivo, levando em consideração que haja mais réplicas por deployment, o algoritmo selecionado irá atuar no balanceamento de carga.
