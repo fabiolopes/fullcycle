@@ -503,3 +503,71 @@ spec:
 ```
 
 Ao aplicar o arquivo, levando em consideração que haja mais réplicas por deployment, o algoritmo selecionado irá atuar no balanceamento de carga.
+
+### Entendendo stick session e consistent hash
+
+No nosso cenário atual, temos 2 versões do nginx convivendo, sendo balanceado via peso. Isso pode provocar algumas situações, como em uma requisição o usuário acessar uma versão da aplicação, e, numa nova requisição do mesmo usuário, outra versão. Imagine que na primeira versão ele tem um formulário de um jeito, e na outra o formulário muda. Isso trás uma experiência inconsistente. O stick session seria uma "sessão fixada" para o usuário. Através de uma forma de identificação do usuário, via consistent hash, uma aplicação, identificamos o usuário, e esse sempre acessará a mesma versão da primeira execução. O consistent hash pode ser criado via header, parâmetro, ip, entre outros. No nosso teste, usaremos um header para diferenciar. Para Isso, criaremos o arquivo consistent-hash, com virtualservice e destination rule parecido com o do exemplo anterior, mas com algumas modificações importantes:
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: nginx-vs
+spec:
+  hosts:
+  - nginx-service
+  http:
+    - route:
+      - destination:
+          host: nginx-service
+          subset: all
+
+
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: nginx-dr
+spec:
+  host: nginx-service
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpHeaderName: "x-user"
+  subsets:
+    - name: all
+      labels:
+        app: nginx
+```
+
+No VirtualService, temos agora apenas 1 subset que atenderá a todas as versões. A nossa trafficPolicy em DestinationRule terá um atributo consistentHash que definirá que o header *x-user* identificará um usuário. Vamos aplicar o arquivo. Entraremos em um dos pods e executaremos *curl* algumas vezes para a nossa url, mas agora utilizando esse header, e vamos ver o que irá acontecer:
+
+```
+fabio@DESKTOP-234:~/fullcycle/istio$ kubectl apply -f deployment.yml
+deployment.apps/nginx configured
+deployment.apps/nginx-b configured
+service/nginx-service unchanged
+
+fabio@DESKTOP-234:~/fullcycle/istio$ kubectl get pods
+NAME                             READY   STATUS    RESTARTS       AGE
+fortio-deploy-689bd5969b-h7fvb   2/2     Running   2 (7h4m ago)   6d20h
+nginx-b-54bd548c87-lvnt4         2/2     Running   2 (7h4m ago)   6d20h
+nginx-5679dcd68b-ls86h           2/2     Running   2 (7h4m ago)   6d20h
+
+fabio@DESKTOP-234:~/fullcycle/istio$ kubectl exec -it nginx-5679dcd68b-ls86h -- bash
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: fabio" http://nginx-service:8000
+Full Cycle Aroot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: lopes" http://nginx-service:8000
+Full Cycle Broot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: lopes" http://nginx-service:8000
+Full Cycle Broot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: lopes" http://nginx-service:8000
+Full Cycle Broot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: lopes" http://nginx-service:8000
+```
+
+Podemos ver que na primeira chamada da url passando no header o x-user fabio, batemos no nginx A, após isso, toda chamada com esse valor no header bateu em A. Após isso, fizemos a chamada passando o x-user lopes, e bateu em B, e sempre que passamos esse valor batemos em B.
