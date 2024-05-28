@@ -571,3 +571,145 @@ Full Cycle Broot@nginx-5679dcd68b-ls86h:/# curl --header "x-user: lopes" http://
 ```
 
 Podemos ver que na primeira chamada da url passando no header o x-user fabio, batemos no nginx A, após isso, toda chamada com esse valor no header bateu em A. Após isso, fizemos a chamada passando o x-user lopes, e bateu em B, e sempre que passamos esse valor batemos em B.
+
+
+### Implementando circuit breaker
+
+O Istio também possibilita a configuração de um circuit breaker apenas com configuração de um destination rule.
+
+Para esse exemplo, vamos utilizar 2 deployments da mesma aplicação: 1 com um endpoint que responderá 200, outros que responderá 504. Para isso, vamos usar um deployment como o descrito abaixo:
+
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: servicex
+spec:
+  selector:
+    matchLabels:
+      app: servicex
+  template:
+    metadata:
+      labels:
+        app: servicex
+        version: "200"
+    spec:
+      containers:
+      - name: servicex
+        image: wesleywillians/circuit-breaker-example-go:latest
+        ports:
+        - containerPort: 8000
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: servicex-error
+spec:
+  selector:
+    matchLabels:
+      app: servicex
+  template:
+    metadata:
+      labels:
+        app: servicex
+        version: "504"
+    spec:
+      containers:
+      - name: servicex
+        image: wesleywillians/circuit-breaker-example-go:error-504
+        ports:
+        - containerPort: 8000
+        env:
+          - name: error
+            value: "yes"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: servicex-service
+spec:
+  type: ClusterIP
+  selector:
+    app: servicex 
+  ports:
+  - port: 80
+    targetPort: 8000
+```
+
+Vamos aplicar esse deployment.
+
+```
+kubectl apply -f circuit-breaker/k8s/deployment.yml
+```
+
+Vamos executar o fortio com a instrução:
+
+```
+kubectl exec "$FORTIO_POD" -c fortio -- fortio load -c 2 -qps 0 -n 20 -loglevel Warning http://servicex-service
+```
+
+Se tudo der certo, teremos uma saída mostrando no fim a quantidade de requisições para cada status recebido:
+
+```
+Code 200 : 14 (70.0 %)
+Code 504 : 5 (25.0 %)
+Response Header Sizes : count 20 avg 115.6 +/- 75.68 min 0 max 166 sum 2312
+Response Body/Total Sizes : count 20 avg 151.85 +/- 36.82 min 0 max 168 sum 3037
+All done 20 calls (plus 0 warmup) 605.511 ms avg, 1.8 qps
+```
+
+Caso a chamada do fortio dê problema, pode ser interessante deletar o service e o deployment do fortio, e refazer a instalação. O mesmo pode ser feito também com o deployment/service do servicex.
+
+Vamos agora criar um destinationrule com política de circuit breaker quando nós recebermos 5 erros de gateway num intervalo de 20s. E, após 30s ele voltará a fechar o circuito:
+
+```
+#circuit-breaker.yml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: circuit-breaker-servicex
+spec:
+  host: servicex-service.default.svc.cluster.local
+  trafficPolicy:
+    outlierDetection:
+      # consecutive5xxErros: 20
+      consecutiveGatewayErrors: 5
+      interval: 20s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+```
+Vamos aplicar o arquivo:
+
+```
+kubectl apply -f circuit-breaker/k8s/deployment.yml
+```
+
+Vamos agora aplicar o fortio, agora com 200 requisições:
+
+```
+kubectl exec "$FORTIO_POD" -c fortio -- fortio load -c 2 -qps 0 -n 200 -loglevel Warning http://servicex-service
+```
+
+Nesse teste, após 5 chamadas reotrnando 504, abriu-se o circuito, mandando todas as requisições para o serviço disponível:
+
+```
+Code 200 : 195 (97.5 %)
+Code 504 : 5 (2.5 %)
+Response Header Sizes : count 200 avg 160.875 +/- 25.76 min 0 max 165 sum 32175
+Response Body/Total Sizes : count 200 avg 166.295 +/- 4.409 min 137 max 167 sum 33259
+All done 200 calls (plus 0 warmup) 51.328 ms avg, 32.6 qps
+```
+
+Fizemos um teste imediatamente após e todas as requisições foram com retoreno 200, porque o circuito ainda estava aberto.
+
+```
+Code 200 : 200 (100.0 %)
+Response Header Sizes : count 200 avg 165 +/- 0 min 165 max 165 sum 33000
+Response Body/Total Sizes : count 200 avg 167 +/- 0 min 167 max 167 sum 33400
+All done 200 calls (plus 0 warmup) 1.507 ms avg, 1324.3 qps
+```
