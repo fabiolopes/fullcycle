@@ -713,3 +713,189 @@ Response Header Sizes : count 200 avg 165 +/- 0 min 165 max 165 sum 33000
 Response Body/Total Sizes : count 200 avg 167 +/- 0 min 167 max 167 sum 33400
 All done 200 calls (plus 0 warmup) 1.507 ms avg, 1324.3 qps
 ```
+
+### Implementando um gateway para acesso externo
+
+Podemos expôr o nosso serviço externamente, mas de forma que um gateway receba o acesso e repasse para dentro do controle do istio, e assim todas as configurações de virtualservice, destinationrule funcione para tal.
+
+Vamos verificar as configurações do ingressgateway do istio:
+
+```
+fabio@DESKTOP-34:~/fullcycle/istio$ kubectl get services -n istio-system
+NAME                   TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)
+               AGE
+istiod                 ClusterIP      10.43.5.32      <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP            29d
+prometheus             ClusterIP      10.43.125.153   <none>        9090/TCP
+               25d
+kiali                  ClusterIP      10.43.128.145   <none>        20001/TCP
+               25d
+tracing                ClusterIP      10.43.79.203    <none>        80/TCP,16685/TCP
+               25d
+zipkin                 ClusterIP      10.43.210.186   <none>        9411/TCP
+               25d
+jaeger-collector       ClusterIP      10.43.250.101   <none>        14268/TCP,14250/TCP,9411/TCP,4317/TCP,4318/TCP   25d
+grafana                ClusterIP      10.43.255.26    <none>        3000/TCP
+               25d
+istio-ingressgateway   LoadBalancer   10.43.252.25    <pending>     15021:30993/TCP,80:30000/TCP,443:31874/TCP       29d
+```
+
+Podemos ver que a porta 80 do istio-ingressgateway bate na porta 30000, que é a porta do nodeport kubernetes configurado.
+
+Outra coisa que podemos observar nesse serviço é que o acesso à porta 80 configurado está utilizando o protocolo http2. Vamos usar essas. Isso pode ser visto executando esse comando:
+
+```
+kubectl describe service istio-ingressgateway -n istio-s
+ystem
+```
+
+Podemos editar a porta de redirecionamento do istio-ingressgateway caso a porta de binding com a 80 seja diferente de 30000, para o nosso exemplo:
+
+```
+kubectl edit svc istio-ingressgateway -n istio-system
+```
+
+Com essas informações, montaremos um gateway, que recebnerá qualquer host na porta 80 para fazer o encaminhamento. Vejamos as configurações do Gateway, VirtualService e DestinationRule:
+
+```
+#gateway.yml
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-k3s
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port: 
+        number: 80
+        name: http
+        protocol: http2
+      hosts:
+      - "*"
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: nginx-vs
+spec:
+  hosts: 
+  - "*"
+  gateways:
+  - ingress-gateway-k3s
+  http:
+    - route:  
+      - destination:
+          host: nginx-service
+          subset: v1
+        weight: 100
+      - destination:
+          host: nginx-service
+          subset: v2
+        weight: 0
+
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: nginx-dr
+spec:
+  host: nginx-service
+  trafficPolicy:
+    loadBalancer:
+      simple: RANDOM
+  subsets:
+    - name: v1
+      labels:
+        version: A
+      trafficPolicy:
+        loadBalancer:
+          simple: LEAST_CONN
+    - name: v2
+      labels:
+        version: B
+```
+
+
+Criaremos um service do nginx, configurando port: 8000 e
+targetPort: 80. Veja os nossos deployments e service:
+
+```
+#deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+        version: A
+    spec:
+      containers:
+      - name: nginx
+        image: wesleywillians/nginx-ab
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 80
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+        version: B
+    spec:
+      containers:
+      - name: nginx
+        image: wesleywillians/nginx-ab:b
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 80
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx
+  ports:
+  - port: 8000
+    targetPort: 80
+    nodePort: 30001
+```
+
+Vamos aplicar os ymls:
+
+```
+kubectl apply -f deployment.yml
+kubectl apply -f gateway.yml
+```
+
+Se tudo funcionar conforme esperado, ao entrar no browser e digitar localhost:8000, além de conseguirmos conexão, receberemos sempre o texto "Full Cycle A", visto que a nossa destinationrule determinou que a v receberá 100% das requisições.
