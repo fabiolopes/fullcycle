@@ -899,3 +899,43 @@ kubectl apply -f gateway.yml
 ```
 
 Se tudo funcionar conforme esperado, ao entrar no browser e digitar localhost:8000, além de conseguirmos conexão, receberemos sempre o texto "Full Cycle A", visto que a nossa destinationrule determinou que a v receberá 100% das requisições.
+
+### Trabalhando com prefixos no gateway
+
+No exemplo anterior, o controle de acesso a serviços implementados pelo nosso destinationrule utiliza randomicamente os pesos para cada serviço, no caso, 100% das chamadas para o serviço v1, e 0 para o v2. Vamos mudar a configuração para determinar que, acessarmos o prefixo */*, a reqquisição utilizará o serviço v1, todavia, se o prefixo utilizado na requisição for */b*, a destinação será o seriço v2. Para isso, atualizaremos o VirtualService:
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: nginx-vs
+spec:
+  hosts: 
+  - "*"
+  gateways:
+  - ingress-gateway-k3s
+  http:
+    - match:
+      - uri:
+          prefix: "/b"
+      route:
+      - destination:
+          host: nginx-service
+          subset: v2
+    - match:
+      - uri: 
+          prefix: "/"
+      route:
+      - destination:
+          host: nginx-service
+          subset: v1
+```
+
+
+Aplicaremos o nosso arquivo:
+
+```
+kubectl apply -f gateway.yml
+```
+
+O compoirtamento esperado é, quando acessarmos localhost:8000/, será exibida a mensagem "Full Cycle A". Caso seja localhost:8000/b, receberemos o retorno 404 do servidor, o que não é ruim. A questão é que como não configuramos nenhum serviço /b no nginx e nossa aplicação não tem esse endpoint, então recebemos not found.
