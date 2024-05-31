@@ -939,3 +939,55 @@ kubectl apply -f gateway.yml
 ```
 
 O compoirtamento esperado é, quando acessarmos localhost:8000/, será exibida a mensagem "Full Cycle A". Caso seja localhost:8000/b, receberemos o retorno 404 do servidor, o que não é ruim. A questão é que como não configuramos nenhum serviço /b no nginx e nossa aplicação não tem esse endpoint, então recebemos not found.
+
+### Trabalhanmdo com domínios no gateway
+
+Podemos configurar virtualservices por domínio também. Para nosso teste local, iremos criar 2 domínios que no fim das contas será na nossa máquina local: a.fullcycle e b.fullcycle. Para isso, vamos editar o nosso arquivo de hosts do windows c:windows/system32/drivers/etc/hosts, adicionando o mapeamento:
+
+```
+localhost a.fullcycle b.fullcycle
+```
+
+Após isso, vamos implementar 2 virtualservices. nginx-vs escutará o host a.fullcycle e chamará o subset v1, o virtualservice nginx-vs-b escutará o host b.fullcycle e chamará o subset v2.
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: nginx-vs
+spec:
+  hosts: 
+  - "a.fullcycle"
+  gateways:
+  - ingress-gateway-k3s
+  http:
+    - route:
+      - destination:
+          host: nginx-service
+          subset: v1
+
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: nginx-vs-b
+spec:
+  hosts: 
+  - "b.fullcycle"
+  gateways:
+  - ingress-gateway-k3s
+  http:
+    - route:
+      - destination:
+          host: nginx-service
+          subset: v2
+```
+
+Aplicaremos o gateway modificado:
+
+```
+kubectl apply -f gateway.yml
+```
+
+Se tudo der certo, ao acessar no browser a.fullcycle:8000, receberemos a mensagem "Full Cycle A", e ao acessar b.fullcycle:8000/, receberemos Full Cycle B.
